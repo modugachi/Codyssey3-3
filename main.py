@@ -1,326 +1,103 @@
-import json
-import math
-import os
-import time
+"""README.md 에 보너스 과제 내용을 반영한다. (main.py 와 같은 폴더에서 실행)
 
-EPSILON = 1e-9   # 동점으로 볼 허용오차
+사용법: python3 bonus_readme_patch.py
+- 모드 선택 화면에 3번(보너스)을 추가하고, 8장을 '수행함'으로 바꾸고, 체크리스트를 보강한다.
+- 8-2 의 측정 표는 이 컴퓨터에서 main.compare_performance() 를 실행해 그대로 넣는다.
+"""
+import contextlib
+import io
+from pathlib import Path
 
-# data.json은 main.py가 있는 폴더에서 찾는다. (어느 폴더에서 실행해도 동작)
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-DATA_FILE = os.path.join(BASE_DIR, "data.json")
+import main
 
-def normalize_label(raw):
-    """입력 라벨을 표준 라벨(Cross, X)로 바꾼다. 알 수 없으면 None."""
-    text = str(raw).strip().lower()
-    if text in ("+", "cross"):
-        return "Cross"
-    if text == "x":
-        return "X"
-    return None
+readme_path = Path("README.md")
+text = readme_path.read_text(encoding="utf-8")
 
 
-def mac(pattern, filt):
-    """2차원 패턴과 필터를 위치별로 곱해 모두 더한다. (반복문 직접 구현)"""
-    n = len(pattern)
-    total = 0.0
-    for r in range(n):
-        for c in range(n):
-            total += pattern[r][c] * filt[r][c]
-    return total
+def replace(old, new, count=1):
+    global text
+    found = text.count(old)
+    if found != count:
+        raise SystemExit(f"README 에서 찾을 문장이 {found}번 나옵니다(기대 {count}번): {old[:50]!r}")
+    text = text.replace(old, new)
 
 
-def decide(score_1, score_2):
-    """두 점수를 비교해 1이 크면 'first', 2가 크면 'second', 동점이면 'tie'."""
-    if abs(score_1 - score_2) < EPSILON:
-        return "tie"
-    return "first" if score_1 > score_2 else "second"
+# 1) 모드 선택 화면 예시 3곳에 3번 추가
+replace("2. data.json 분석\n선택",
+        "2. data.json 분석\n3. 보너스 (패턴 생성기, 최적화 비교)\n선택", count=3)
 
-# ========== 모드 2: data.json 분석 ==========
-def load_data(path=DATA_FILE):
-    """data.json을 읽어 dict로 돌려준다. 읽을 수 없으면 안내 후 None."""
-    try:
-        with open(path, "r", encoding="utf-8") as file:
-            return json.load(file)
-    except (OSError, json.JSONDecodeError) as error:
-        print(f"⚠️ {path} 을(를) 읽을 수 없습니다: {error}")
-        return None
+# 2) 1장 개요 / 3장 실행 방법에 모드 3 설명 추가
+replace("- **모드 2:** `data.json`의 필터(5×5, 13×13, 25×25)와 패턴을 일괄 판정하고, 성능 분석과 결과 요약을 출력한다.",
+        "- **모드 2:** `data.json`의 필터(5×5, 13×13, 25×25)와 패턴을 일괄 판정하고, 성능 분석과 결과 요약을 출력한다.\n"
+        "- **모드 3 (보너스):** N×N 십자가·X 패턴을 자동 생성해 판정하고, 2차원 배열 MAC과 1차원 배열 MAC의 시간을 비교한다.")
+replace("- **모드 2:** 별도 입력 없이 `data.json`을 읽어 자동으로 분석한다. `data.json`은 `main.py`와 같은 폴더에 있어야 한다.",
+        "- **모드 2:** 별도 입력 없이 `data.json`을 읽어 자동으로 분석한다. `data.json`은 `main.py`와 같은 폴더에 있어야 한다.\n"
+        "- **모드 3 (보너스):** 보너스 메뉴에서 `1`(패턴 생성기, 3 이상의 홀수 N 입력) 또는 `2`(최적화 전/후 비교)를 고른다. `3`을 입력하면 종료한다.")
 
+# 3) 8장 보너스 과제
+bonus_old = "보너스 과제(1차원 배열 최적화, 패턴 생성기)는 수행하지 않았다."
+if text.count(bonus_old) != 1:
+    raise SystemExit("8장의 '수행하지 않았다' 문장을 찾지 못했습니다. 직접 8장을 확인하세요.")
 
-def is_square(grid, n):
-    """grid가 n×n 숫자 격자인지 확인한다."""
-    if not isinstance(grid, list) or len(grid) != n:
-        return False
-    for row in grid:
-        if not isinstance(row, list) or len(row) != n:
-            return False
-        for value in row:
-            if isinstance(value, bool) or not isinstance(value, (int, float)):
-                return False
-    return True
+buffer = io.StringIO()
+with contextlib.redirect_stdout(buffer):
+    main.compare_performance()
+bench = buffer.getvalue().strip()
 
+bonus_new = f"""보너스 과제 두 가지를 모드 3(보너스)으로 구현했다.
 
-def load_filters(data):
-    """size_N 필터를 {N: {"Cross": 격자, "X": 격자}} 형태로 정리한다. (라벨 정규화 포함)"""
-    filters = {}
-    raw_filters = data.get("filters", {}) if isinstance(data, dict) else {}
-    for size_key, pair in raw_filters.items():
-        try:
-            n = int(size_key.split("_")[1])            # 'size_5' -> 5
-            standard = {}
-            for raw_label, grid in pair.items():
-                label = normalize_label(raw_label)     # 'cross' -> 'Cross'
-                if label is None or not is_square(grid, n):
-                    raise ValueError
-                standard[label] = grid
-            if set(standard) != {"Cross", "X"}:
-                raise ValueError
-            filters[n] = standard
-            print(f"✓ {size_key} 필터 로드 완료 (Cross, X)")
-        except (IndexError, ValueError, AttributeError):
-            print(f"⚠️ {size_key} 필터 형식 오류: 이 필터는 건너뜁니다.")
-    return filters
+### 8-1. 패턴 생성기
 
+크기 N을 입력하면 N×N 십자가(Cross)와 X 패턴을 자동으로 만든다. 만든 패턴은 기존 `mac()`과 `decide()`로 판정하고 `print_performance()`로 성능을 분석하는 데 그대로 재사용한다. 3×3 성능 측정용 기본 샘플(`CROSS_3X3`, `X_3X3`)도 이 생성기로 만든다.
 
-def run_case(key, case, filters):
-    """케이스 1개를 처리해 결과 dict를 돌려준다. 어떤 오류가 있어도 프로그램이 죽지 않는다."""
-    result = {"key": key, "cross": None, "x": None,
-              "prediction": None, "expected": None,
-              "status": "FAIL", "reason": ""}
+| 패턴 | 규칙 | 함수 |
+|---|---|---|
+| Cross | 가운데 행(`r == N//2`) 또는 가운데 열(`c == N//2`)이 1 | `generate_cross(n)` |
+| X | 두 대각선(`r == c` 또는 `r + c == N-1`)이 1 | `generate_x(n)` |
 
-    # 1) 키에서 크기 N 추출: size_5_1 -> 5
-    try:
-        n = int(key.split("_")[1])
-    except (IndexError, ValueError, AttributeError):
-        result["reason"] = "키에서 크기(N)를 읽을 수 없음"
-        return result
+- **N은 3 이상의 홀수만 받는다.** 짝수는 가운데가 한 줄로 정해지지 않아 대칭 모양이 만들어지지 않기 때문이다. 숫자가 아니거나 짝수·3 미만이면 안내 후 다시 입력받는다.
 
-    # 2) 해당 크기의 필터가 있는지
-    if n not in filters:
-        result["reason"] = f"size_{n} 필터가 없음"
-        return result
+```text
+[생성된 Cross 5×5]
+□ □ ■ □ □
+□ □ ■ □ □
+■ ■ ■ ■ ■
+□ □ ■ □ □
+□ □ ■ □ □
 
-    # 3) input / expected 항목이 있는지, expected 정규화
-    try:
-        grid = case["input"]
-        raw_expected = case["expected"]
-    except (KeyError, TypeError):
-        result["reason"] = "input 또는 expected 항목이 없음 (스키마 오류)"
-        return result
-    expected = normalize_label(raw_expected)
-    result["expected"] = expected
-    if expected is None:
-        result["reason"] = f"expected 라벨을 알 수 없음: {raw_expected!r}"
-        return result
+[생성된 X 5×5]
+■ □ □ □ ■
+□ ■ □ ■ □
+□ □ ■ □ □
+□ ■ □ ■ □
+■ □ □ □ ■
+#---------------------------------------
+# 생성한 패턴 판정 (필터 A = Cross, 필터 B = X)
+#---------------------------------------
+입력 Cross| A 점수: 9.0 | B 점수: 1.0 | 판정: Cross | expected: Cross | PASS
+입력 X    | A 점수: 1.0 | B 점수: 9.0 | 판정: X | expected: X | PASS
+```
 
-    # 4) 패턴 크기 검증 (필터와 같은 N×N인지)
-    if not is_square(grid, n):
-        result["reason"] = f"크기 불일치: 패턴이 {n}×{n} 숫자 격자가 아님"
-        return result
+### 8-2. 시뮬레이터 최적화 (1차원 배열)
 
-    # 5) MAC 연산과 판정
-    result["cross"] = mac(grid, filters[n]["Cross"])
-    result["x"] = mac(grid, filters[n]["X"])
-    outcome = decide(result["cross"], result["x"])
-    result["prediction"] = {"first": "Cross", "second": "X", "tie": "UNDECIDED"}[outcome]
+2차원 배열 `grid[r][c]`를 길이 N²의 1차원 배열로 펼치면(`flat[r*N + c]`) 이중 반복문이 반복문 하나로 줄어들어 접근 패턴이 단순해진다. 두 방식에 **같은 입력(Cross 필터, X 패턴)과 같은 반복 횟수({main.BONUS_REPEAT}회)**를 주고 평균 시간을 비교했다.
 
-    # 6) PASS / FAIL
-    if result["prediction"] == expected:
-        result["status"] = "PASS"
-    elif result["prediction"] == "UNDECIDED":
-        result["reason"] = "동점(UNDECIDED) 처리 규칙에 따라 FAIL"
-    else:
-        result["reason"] = "판정과 expected 불일치"
-    return result
+- **변환 비용:** `flatten()`은 준비 작업으로 한 번만 하면 되므로 측정에서 제외했다.
+- **정확성:** 두 방식의 점수 차이가 epsilon(`1e-9`) 미만이면 `결과 일치`를 `OK`로 표시한다. 행을 차례로 이어 붙여 같은 순서로 곱하고 더하므로 점수는 같다.
 
+```text
+{bench}
+```
 
-def print_case(result):
-    """케이스 결과 1개를 출력한다."""
-    print(f"--- {result['key']} ---")
-    if result["cross"] is not None:
-        print(f"Cross 점수: {result['cross']}")
-        print(f"X 점수: {result['x']}")
-        print(f"판정: {result['prediction']} | expected: {result['expected']} | {result['status']}")
-        if result["reason"]:
-            print(f"  사유: {result['reason']}")
-    else:
-        print(f"판정 불가 | {result['status']}")
-        print(f"  사유: {result['reason']}")
+- **해석:** `개선 배수`는 (2차원 시간) ÷ (1차원 시간)이다. 1보다 크면 1차원 방식이 빠른 것이다. 파이썬에서는 반복문 자체의 비용이 커서 이중 반복문을 하나로 줄여도 개선 폭이 크지 않을 수 있고, 크기가 커질수록 그 폭이 줄어들 수 있다. 값은 실행할 때마다, 컴퓨터마다 달라지므로 같은 조건의 전/후 비교로만 해석한다.
+- **의미:** 실제 NPU에서는 데이터를 연속된 메모리에 한 줄로 놓아 읽는 것이 효율에 크게 영향을 준다. 이 실험은 그 아이디어를 파이썬 수준에서 확인해 본 것이다."""
+replace(bonus_old, bonus_new)
 
+# 4) 체크리스트 보강
+replace("- [x] 결과 리포트에 실패 원인 분석과 시간 복잡도 O(N²) 근거 서술",
+        "- [x] 결과 리포트에 실패 원인 분석과 시간 복잡도 O(N²) 근거 서술\n"
+        "- [x] 보너스 1: 시뮬레이터 최적화(2차원 → 1차원 배열) 전/후 성능 비교\n"
+        "- [x] 보너스 2: 패턴 생성기(N×N Cross/X)와 판정·성능 분석 재사용")
 
-REPEAT = 10   # 성능 측정 반복 횟수
-
-# 3×3 성능 측정용 기본 샘플 (십자가 필터, X 필터)
-CROSS_3X3 = [[0, 1, 0], [1, 1, 1], [0, 1, 0]]
-X_3X3 = [[1, 0, 1], [0, 1, 0], [1, 0, 1]]
-
-
-def measure(func, repeat=REPEAT):
-    """func를 repeat번 실행해 평균 시간(ms)을 돌려준다. (연산 함수 호출 구간만 측정)"""
-    total = 0.0
-    for _ in range(repeat):
-        start = time.perf_counter()
-        func()
-        total += time.perf_counter() - start
-    return total / repeat * 1000
-
-
-def print_performance(samples):
-    """samples: [(N, 패턴, 필터), ...] 크기별 평균 시간과 연산 횟수 표를 출력한다."""
-    print(f"{'크기':<10}{'평균 시간(ms)':<18}{'연산 횟수(N²)':<10}")
-    print("-" * 38)
-    for n, pattern, filt in samples:
-        avg_ms = measure(lambda: mac(pattern, filt))
-        print(f"{str(n) + '×' + str(n):<10}{avg_ms:<18.6f}{n * n:<10}")
-
-
-def print_summary(results):
-    """총 테스트 수, 통과 수, 실패 수와 실패 케이스 목록을 출력한다."""
-    passed = sum(1 for r in results if r["status"] == "PASS")
-    failed = [r for r in results if r["status"] == "FAIL"]
-    print(f"총 테스트: {len(results)}개")
-    print(f"통과: {passed}개")
-    print(f"실패: {len(failed)}개")
-    if failed:
-        print("실패 케이스:")
-        for r in failed:
-            print(f"- {r['key']}: {r['reason']}")
-
-
-def run_data_mode():
-    """data.json 모드: 필터 로드 → 패턴 분석 → 성능 분석 → 결과 요약."""
-    data = load_data()
-    if data is None:
-        return []
-
-    print("#" + "-" * 39)
-    print("# [1] 필터 로드")
-    print("#" + "-" * 39)
-    filters = load_filters(data)
-
-    print("#" + "-" * 39)
-    print("# [2] 패턴 분석 (라벨 정규화 적용)")
-    print("#" + "-" * 39)
-    patterns = data.get("patterns") if isinstance(data, dict) else None
-    if not isinstance(patterns, dict):
-        print("⚠️ patterns 항목이 없거나 형식이 올바르지 않습니다.")
-        return []
-
-    results = []
-    for key, case in patterns.items():
-        result = run_case(key, case, filters)
-        print_case(result)
-        results.append(result)
-
-    print("#" + "-" * 39)
-    print(f"# [3] 성능 분석 (평균/{REPEAT}회)")
-    print("#" + "-" * 39)
-    samples = [(3, CROSS_3X3, X_3X3)]
-    for n in sorted(filters):
-        samples.append((n, filters[n]["Cross"], filters[n]["X"]))
-    print_performance(samples)
-
-    print("#" + "-" * 39)
-    print("# [4] 결과 요약")
-    print("#" + "-" * 39)
-    print_summary(results)
-    return results
-
-
-# ========== 모드 1: 사용자 입력 (3×3) ==========
-def parse_row(text, n):
-    """공백으로 구분된 n개의 숫자 한 줄을 리스트로 바꾼다. 형식이 틀리면 None."""
-    parts = text.split()
-    if len(parts) != n:                      # 열 개수 불일치
-        return None
-    row = []
-    for part in parts:
-        try:
-            value = float(part)              # 숫자 파싱 실패 (예: abc)
-        except ValueError:
-            return None
-        if not math.isfinite(value):         # nan, inf 제외
-            return None
-        row.append(value)
-    return row
-
-
-def read_grid(title, n=3):
-    """n줄을 입력받아 n×n 격자를 돌려준다. 잘못 입력한 줄은 그 줄만 다시 입력받는다."""
-    print(f"{title} ({n}줄 입력, 공백 구분)")
-    grid = []
-    while len(grid) < n:
-        row = parse_row(input(), n)
-        if row is None:
-            print(f"입력 형식 오류: 각 줄에 {n}개의 숫자를 공백으로 구분해 입력하세요.")
-            continue
-        grid.append(row)
-    return grid
-
-
-def print_grid(grid):
-    """격자를 한 줄씩 출력한다."""
-    for row in grid:
-        print("  " + " ".join(str(value) for value in row))
-
-
-def run_user_mode():
-    """사용자 입력 모드: 필터 A, B 입력 → 저장 확인 → 패턴 입력 → MAC → 판정 → 성능 분석."""
-    print("#" + "-" * 39)
-    print("# [1] 필터 입력")
-    print("#" + "-" * 39)
-    filter_a = read_grid("필터 A")
-    filter_b = read_grid("필터 B")
-    print("✓ 필터 A, B 저장 완료")
-    print("필터 A:")
-    print_grid(filter_a)
-    print("필터 B:")
-    print_grid(filter_b)
-
-    print("#" + "-" * 39)
-    print("# [2] 패턴 입력")
-    print("#" + "-" * 39)
-    pattern = read_grid("패턴")
-
-    print("#" + "-" * 39)
-    print("# [3] MAC 결과")
-    print("#" + "-" * 39)
-    score_a = mac(pattern, filter_a)
-    score_b = mac(pattern, filter_b)
-    avg_ms = measure(lambda: (mac(pattern, filter_a), mac(pattern, filter_b)))
-    print(f"A 점수: {score_a}")
-    print(f"B 점수: {score_b}")
-    print(f"연산 시간(평균/{REPEAT}회): {avg_ms:.6f} ms")
-    outcome = decide(score_a, score_b)
-    if outcome == "tie":
-        print(f"판정: 판정 불가 (|A-B| < {EPSILON})")
-    else:
-        print(f"판정: {'A' if outcome == 'first' else 'B'}")
-
-    print("#" + "-" * 39)
-    print(f"# [4] 성능 분석 (3×3, 평균/{REPEAT}회)")
-    print("#" + "-" * 39)
-    print_performance([(3, pattern, filter_a)])
-
-
-# ========== 메뉴 ==========
-def main():
-    print("=== Mini NPU Simulator ===")
-    print("[모드 선택]")
-    print("1. 사용자 입력 (3x3)")
-    print("2. data.json 분석")
-    try:
-        while True:
-            choice = input("선택: ").strip()
-            if choice == "1":
-                run_user_mode()
-                break
-            if choice == "2":
-                run_data_mode()
-                break
-            print("⚠️ 잘못된 입력입니다. 1 또는 2를 입력하세요.")
-    except (KeyboardInterrupt, EOFError):
-        print("\n입력이 중단되어 프로그램을 종료합니다.")
-
-
-if __name__ == "__main__":
-    main()
+readme_path.write_text(text, encoding="utf-8")
+print("README.md 에 보너스 과제를 반영했습니다.")
